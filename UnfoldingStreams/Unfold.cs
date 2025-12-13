@@ -34,6 +34,17 @@ public static class UnfoldExtensions
     select res
   );
 
+  public static K<M, Unit> Iter<S, M, T>(this Unfold<S, M, T> unfold)
+  where M : Monad<M>, MonadIO<M>, Alternative<M> => (
+    from nxtHead in unfold.Step(unfold.Start)
+    let tail = nxtHead.Item1.Match(
+      None: () => M.Pure(unit),
+      Some: s => new Unfold<S, M, T>(s, unfold.Step).Iter()
+    )
+    from res in tail
+    select res
+  );
+
   public static Unfold<S, M, T> Take<S, M, T>(this Unfold<S, M, T> unfold, int n)
   where M : MonadIO<M>, Alternative<M> =>
     Unfold.take(unfold, n);
