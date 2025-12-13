@@ -21,6 +21,19 @@ public static class UnfoldExtensions
     select res
   );
 
+  public static K<M, Seq<T>> Collect<S, M, T>(this Unfold<S, M, T> unfold)
+  where M : Monad<M>, MonadIO<M>, Alternative<M> => (
+    from nxtHead in unfold.Step(unfold.Start)
+    let tail = nxtHead.Item1.Match(
+      None: () => M.Pure(toSeq<T>([])),
+      Some: s => new Unfold<S, M, T>(s, unfold.Step).Collect()
+    )
+    from res in nxtHead.Item2.Match(
+      Some: h => tail.Map(t => [h] + t),
+      None: () => tail)
+    select res
+  );
+
   public static Unfold<S, M, T> Take<S, M, T>(this Unfold<S, M, T> unfold, int n)
   where M : MonadIO<M>, Alternative<M> =>
     Unfold.take(unfold, n);
@@ -101,7 +114,7 @@ public static partial class Unfold
 {
   public static Unfold<Unit, M, T> foreverMFiltered<M, T>(Func<K<M, Option<T>>> step)
   where M : MonadIO<M>, Alternative<M>, Functor<M> =>
-    new Unfold<Unit, M, T>(
+    new(
       unit,
       _ => step().Map(x => (Some(unit), x)));
 
@@ -111,7 +124,7 @@ public static partial class Unfold
 
   public static Unfold<Seq<T>, M, T> fromSeq<M, T>(Seq<T> seq)
   where M : MonadIO<M>, Alternative<M> =>
-    new Unfold<Seq<T>, M, T>(
+    new(
       seq,
       rem => M.Pure(rem.Match(
         Empty: () => (None, None),
@@ -119,15 +132,21 @@ public static partial class Unfold
 
   public static Unfold<(Seq<T> Elements, int Index), M, T> cycle<M, T>(Seq<T> elements)
   where M : MonadIO<M>, Alternative<M> =>
-    new Unfold<(Seq<T> Elements, int Index), M, T>(
+    new(
       (elements, 0),
       state => M.Pure(
         (Some((state.Elements, (state.Index + 1) % state.Elements.Count == 0 ? 0 : state.Index + 1)),
          Some(state.Elements[state.Index % state.Elements.Count]))));
 
+  public static Unfold<S, M, T> iter<S, M, T>(S init, Func<S, K<M, (Option<S>, T)>> step)
+  where M : MonadIO<M>, Alternative<M> =>
+    new(
+      init,
+      s => step(s).Map(st => (st.Item1, Some(st.Item2))));
+
   public static Unfold<S, M, T> empty<S, M, T>(S start)
   where M : MonadIO<M>, Alternative<M>, Monad<M> =>
-    new Unfold<S, M, T>(
+    new(
       start,
       _ => M.Pure<(Option<S>, Option<T>)>((None, None)));
 
@@ -137,7 +156,7 @@ public static partial class Unfold
 
   public static Unfold<(S, T), M, (A, B)> zip<S, M, T, A, B>(Unfold<S, M, A> l, Unfold<T, M, B> r)
   where M : MonadIO<M>, Alternative<M>, Applicative<M> =>
-    new Unfold<(S, T), M, (A, B)>(
+    new(
       (l.Start, r.Start),
       s => (l.Step(s.Item1), r.Step(s.Item2)).Apply(
         (lt, rt) => (
@@ -146,7 +165,7 @@ public static partial class Unfold
 
   public static Unfold<S, M, T> takeWhile<S, M, T>(Unfold<S, M, T> unfold, Func<T, bool> predicate)
   where M : MonadIO<M>, Alternative<M>, Functor<M> =>
-    new Unfold<S, M, T>(
+    new(
       unfold.Start,
       s => M.Map<(Option<S>, Option<T>), (Option<S>, Option<T>)>(
         t => t.Item2.Match(
@@ -209,13 +228,13 @@ public static partial class Unfold
   public static Unfold<S, G, A> transform<S, F, G, A>(Unfold<S, F, A> unfold, NaturalTransformation<F, G> f)
   where G : MonadIO<G>, Alternative<G>
   where F : MonadIO<F>, Alternative<F> =>
-    new Unfold<S, G, A>(
+    new(
       unfold.Start,
       s => f.Transform(unfold.Step(s)));
 
   public static Unfold<S, M, T> filter<S, M, T>(Unfold<S, M, T> unfold, Func<T, bool> predicate)
   where M : MonadIO<M>, Alternative<M>, Functor<M> =>
-    new Unfold<S, M, T>(
+    new(
       unfold.Start,
       s => M.Map<(Option<S>, Option<T>), (Option<S>, Option<T>)>(
         t => (t.Item1, t.Item2.Filter(predicate)),
@@ -227,7 +246,7 @@ public static partial class Unfold
     Func<U, bool> predicate,
     U initial
   ) where M : MonadIO<M>, Alternative<M>, Monad<M> =>
-    new Unfold<(S, U), M, U>(
+    new(
       (unfold.Start, initial),
       su => unfold.Step(su.Item1).Map(st => (
         from nu in Identity.Pure(
@@ -336,7 +355,7 @@ public static partial class Unfold
   public static Unfold<S, M, T> concat<S, M, T>(Unfold<S, M, T> fst, Unfold<S, M, T> snd)
   where M : MonadIO<M>, Alternative<M>, Monad<M> {
     var finishedFst = false;
-    return new Unfold<S, M, T>(
+    return new(
       fst.Start,
       s => finishedFst
         ? snd.Step(s)
@@ -352,13 +371,13 @@ public static partial class Unfold
 
   public static Unfold<S, M, U> map<S, M, T, U>(this Unfold<S, M, T> unfold, Func<T, U> f)
   where M : MonadIO<M>, Alternative<M> =>
-    new Unfold<S, M, U>(
+    new(
       unfold.Start,
       s => unfold.Step(s).Map(t => (t.Item1, t.Item2.Map(f))));
 
   public static Unfold<S, M, U> filterMap<S, M, T, U>(this Unfold<S, M, T> unfold, Func<T, Option<U>> f)
   where M : MonadIO<M>, Alternative<M> =>
-    new Unfold<S, M, U>(
+    new(
       unfold.Start,
       s => unfold.Step(s).Map(t => (t.Item1, t.Item2.Bind(f))));
 }
