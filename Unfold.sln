@@ -3,9 +3,9 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UnfoldingStreams", "UnfoldingStreams\UnfoldingStreams.csproj", "{C44F249A-6B4C-4746-BB11-D9B15E81CADE}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Unfold", "Unfold\Unfold.csproj", "{C44F249A-6B4C-4746-BB11-D9B15E81CADE}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UnfoldingStreams.Tests", "UnfoldingStreams.Tests\UnfoldingStreams.Tests.csproj", "{B83252A9-15C5-4E48-8F4B-6C9F8DD2D7F1}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Unfold.Tests", "Unfold.Tests\Unfold.Tests.csproj", "{B83252A9-15C5-4E48-8F4B-6C9F8DD2D7F1}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

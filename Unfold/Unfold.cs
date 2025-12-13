@@ -1,9 +1,17 @@
-﻿namespace UnfoldingStreams;
+﻿namespace Unfold;
 
 public record struct Unfold<S, M, T>(
   S Start,
   Func<S, K<M, (Option<S> State, Option<T> Emit)>> Step
 ) where M : MonadIO<M>, Alternative<M>;
+
+public static partial class Unfold
+{
+  public static Unfold<Option<S>, M, T> New<S, M, T>(
+    Func<Option<S>, K<M, (Option<Option<S>> State, Option<T> Emit)>> Step)
+    where M : MonadIO<M>, Alternative<M> =>
+    new(None, Step);
+}
 
 public static class UnfoldExtensions
 {

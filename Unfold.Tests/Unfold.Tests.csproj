@@ -20,7 +20,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\UnfoldingStreams\UnfoldingStreams.csproj" />
+    <ProjectReference Include="..\Unfold\Unfold.csproj" />
   </ItemGroup>
 
 </Project>

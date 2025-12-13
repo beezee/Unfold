@@ -1,4 +1,4 @@
-namespace UnfoldingStreams;
+namespace Unfold;
 
 public interface NaturalTransformation<F, G>
 {

@@ -1,5 +1,7 @@
 using System.Diagnostics;
 
+namespace Unfold;
+
 public interface WithTimeout<M>
 where M : MonadIO<M>
 {
@@ -16,8 +18,8 @@ where M : MonadIO<M>
 public class TimedUnliftIO<M> : WithTimeout<M>
 where M : MonadUnliftIO<M>
 {
-  public K<M, Option<A>> Run<A>(Func<K<M, A>> ma, TimeSpan timeout) => 
-    ma().TimeoutIO(timeout).Map(Some).MapIO(x => 
+  public K<M, Option<A>> Run<A>(Func<K<M, A>> ma, TimeSpan timeout) =>
+    ma().TimeoutIO(timeout).Map(Some).MapIO(x =>
       x.Catch(
         Predicate: e => e.Is(Errors.TimedOut) || e.Is(Errors.Cancelled),
         Fail: _ => IO.pure<Option<A>>(None)));
@@ -33,10 +35,10 @@ where M : MonadIO<M>
 public static class WithTimeout
 {
   public static WithTimeout<M> UnliftIO<M>()
-  where M: MonadUnliftIO<M> => new TimedUnliftIO<M>();
+  where M : MonadUnliftIO<M> => new TimedUnliftIO<M>();
 
   public static WithTimeout<M> HonorSystem<M>()
-  where M: MonadIO<M> => new TimedHonorSystem<M>();
+  where M : MonadIO<M> => new TimedHonorSystem<M>();
 }
 
 public static class ScheduleExtensions

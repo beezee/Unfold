@@ -1,6 +1,6 @@
 ﻿using Xunit;
 
-namespace UnfoldingStreams.Tests;
+namespace Unfold.Tests;
 
 public record MyEitherIO<E, A>(EitherT<E, IO, A> Run): K<MyEitherIO<E>, A>;
 
