@@ -1,9 +1,25 @@
 ﻿namespace Unfold;
 
+public record UnfoldFromIO<S, M, T, I>(
+  Unfold<S, M, T> Unfold,
+  I Iso
+) where I : NaturalTransformation<M, EitherT<S, IO>>, NaturalTransformation<EitherT<S, IO>, M>
+{
+
+  public UnfoldFromIO<S, M, T2, I> Map<T2>(Func<Unfold<S, M, T>, Unfold<S, M, T2>> f) =>
+    new(f(this.Unfold), this.Iso);
+}
+
 public record struct Unfold<S, M, T>(
   S Start,
   Func<S, K<M, (Option<S> State, Option<T> Emit)>> Step
-) where M : MonadIO<M>, Alternative<M>;
+)
+{
+  public readonly UnfoldFromIO<S, M, T, I> IsoIO<I>(
+    I Iso
+  ) where I : NaturalTransformation<M, EitherT<S, IO>>, NaturalTransformation<EitherT<S, IO>, M> =>
+    new(this, Iso);
+};
 
 public static partial class Unfold
 {
@@ -29,12 +45,12 @@ public static class UnfoldExtensions
     select res
   );
 
-  public static K<M, Seq<T>> Collect<S, M, T>(this Unfold<S, M, T> unfold)
+  public static K<M, Seq<T>> CollectRec<S, M, T>(this Unfold<S, M, T> unfold)
   where M : Monad<M>, MonadIO<M>, Alternative<M> => (
     from nxtHead in unfold.Step(unfold.Start)
     let tail = nxtHead.Item1.Match(
       None: () => M.Pure(toSeq<T>([])),
-      Some: s => new Unfold<S, M, T>(s, unfold.Step).Collect()
+      Some: s => new Unfold<S, M, T>(s, unfold.Step).CollectRec()
     )
     from res in nxtHead.Item2.Match(
       Some: h => tail.Map(t => [h] + t),
@@ -42,12 +58,12 @@ public static class UnfoldExtensions
     select res
   );
 
-  public static K<M, Unit> Iter<S, M, T>(this Unfold<S, M, T> unfold)
+  public static K<M, Unit> IterRec<S, M, T>(this Unfold<S, M, T> unfold)
   where M : Monad<M>, MonadIO<M>, Alternative<M> => (
     from nxtHead in unfold.Step(unfold.Start)
     let tail = nxtHead.Item1.Match(
       None: () => M.Pure(unit),
-      Some: s => new Unfold<S, M, T>(s, unfold.Step).Iter()
+      Some: s => new Unfold<S, M, T>(s, unfold.Step).IterRec()
     )
     from res in tail
     select res
@@ -399,4 +415,41 @@ public static partial class Unfold
     new(
       unfold.Start,
       s => unfold.Step(s).Map(t => (t.Item1, t.Item2.Bind(f))));
+
+  public static Unfold<S, M, U> bindM<S, M, T, U>(this Unfold<S, M, T> unfold, Func<T, K<M, U>> f)
+  where M : MonadIO<M>, Alternative<M>, Monad<M> =>
+    new(
+      unfold.Start,
+      s => unfold.Step(s)
+        .Bind(t => t.Emit.Traverse(f).Map(x => (t.State, x)))
+    );
+
+  public static K<M, (Option<S>, Seq<A>)> Collect<M, S, A, T>(
+    this UnfoldFromIO<S, M, A, T> unfold
+  )
+  where T : NaturalTransformation<M, EitherT<S, IO>>, NaturalTransformation<EitherT<S, IO>, M> {
+    var results = new List<A>();
+    Option<S> lastProcessedState = None;
+    return unfold.Iso.Transform(EitherT.lift<S, IO, (Option<S>, Seq<A>)>(IO.lift(() =>
+    {
+      var stateOpt = Some(unfold.Unfold.Start);
+
+      while (stateOpt.IsSome)
+      {
+        var s = stateOpt.IfNone(unfold.Unfold.Start);
+
+        var stepRes =
+          unfold.Iso.Transform(unfold.Unfold.Step(s))
+              .As()
+              .Run()
+              .Run();
+
+        lastProcessedState = stepRes.Swap().ToOption().IfNone(s);
+        stateOpt = stepRes.ToOption().Bind(x => x.State);
+        stepRes.ToOption().Bind(x => x.Emit).Iter(x => results.Add(x));
+      }
+
+      return (lastProcessedState, toSeq(results));
+    })));
+  }
 }

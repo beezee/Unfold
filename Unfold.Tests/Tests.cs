@@ -43,6 +43,15 @@ Alternative<MyEitherIO<E>>
     Choose(ma, () => mb);
 }
 
+public record MyEitherIOIso<S>() : NaturalTransformation<MyEitherIO<S>, EitherT<S, IO>>, NaturalTransformation<EitherT<S, IO>, MyEitherIO<S>>
+{
+  public K<EitherT<S, IO>, A> Transform<A>(K<MyEitherIO<S>, A> fa) =>
+    fa.As().Run;
+
+  K<MyEitherIO<S>, A> NaturalTransformation<EitherT<S, IO>, MyEitherIO<S>>.Transform<A>(K<EitherT<S, IO>, A> fa) =>
+    new MyEitherIO<S, A>(fa.As());
+}
+
 public record MapLeft<E1, E2>(Func<E1, E2> Map)
 : NaturalTransformation<Either<E1>, Either<E2>>
 {
@@ -64,7 +73,7 @@ public class Tests
   {
     var count = Atom(0);
     var unfold = Unfold.foreverM(() => swapIO(count, c => c + 1));
-    var result = unfold.Take(5).Collect().Run().AsEnumerable();
+    var result = unfold.Take(5).CollectRec().Run().AsEnumerable();
     Assert.Equal([1, 2, 3, 4, 5], result);
   }
 
@@ -73,12 +82,12 @@ public class Tests
   {
     var count = Atom(0);
     var unfold = Unfold.foreverM(() => swapIO(count, c => c + 1));
-    var result = unfold.Skip(5).Take(10).Collect().Run().AsEnumerable();
+    var result = unfold.Skip(5).Take(10).CollectRec().Run().AsEnumerable();
     Assert.Equal([6, 7, 8, 9, 10, 11, 12, 13, 14, 15], result);
 
     var count2 = Atom(0);
     var unfold2 = Unfold.foreverM(() => swapIO(count2, c => c + 1));
-    var result2 = unfold2.Take(10).Skip(5).Collect().Run().AsEnumerable();
+    var result2 = unfold2.Take(10).Skip(5).CollectRec().Run().AsEnumerable();
     Assert.Equal([6, 7, 8, 9, 10], result2);
   }
   
@@ -87,12 +96,12 @@ public class Tests
   {
     var count = Atom(0);
     var unfold = Unfold.foreverM(() => swapIO(count, c => c + 1));
-    var result = unfold.Filter(x => x % 2 == 0).Take(10).Collect().Run().AsEnumerable();
+    var result = unfold.Filter(x => x % 2 == 0).Take(10).CollectRec().Run().AsEnumerable();
     Assert.Equal([2, 4, 6, 8, 10, 12, 14, 16, 18, 20], result);
 
     var count2 = Atom(0);
     var unfold2 = Unfold.foreverM(() => swapIO(count2, c => c + 1));
-    var result2 = unfold2.Take(10).Filter(x => x % 2 == 0).Collect().Run().AsEnumerable();
+    var result2 = unfold2.Take(10).Filter(x => x % 2 == 0).CollectRec().Run().AsEnumerable();
     Assert.Equal([2, 4, 6, 8, 10], result2);
   }
 
@@ -100,7 +109,7 @@ public class Tests
   public void EmptyTest()
   {
     var unfold = Unfold.empty<IO, int>();
-    var result = unfold.Take(5).Collect().Run().AsEnumerable();
+    var result = unfold.Take(5).CollectRec().Run().AsEnumerable();
     Assert.Empty(result);
   }
 
@@ -108,10 +117,11 @@ public class Tests
   [Fact]
   public void TransformTest()
   {
-    var unfold = Unfold.foreverM(() => new MyEitherIO<string, int>(EitherT.Left<string, IO, int>("Hello")));
-    var transformed = unfold.Transform(new MyEitherIOMapLeft<string, int>(new MapLeft<string, int>(s => s.Length)));
-    var result = transformed.Take(5).Collect().As().Run.Run().Run();
-    Assert.Equal(Left<int, Seq<int>>(5), result);
+    var unfold = new Unfold<int, MyEitherIO<string>, string>(0, n => new MyEitherIO<string, (Option<int>, Option<string>)>(EitherT.Left<string, IO, (Option<int>, Option<string>)>("hello")));
+    var transformed = unfold.Transform(new MyEitherIOMapLeft<string, int>(new MapLeft<string, int>(s => s.Length)))
+      .IsoIO(new MyEitherIOIso<int>());
+    var result = transformed.Map(x => x.Take(5)).Collect().As().Run.Run().Run();
+    Assert.Equal(Right<int, (Option<int>, Seq<string>)>((Some(5), [])), result);
   }
 
   [Fact]
@@ -119,7 +129,7 @@ public class Tests
   {
     var count = Atom(0);
     var unfold = Unfold.foreverM(() => swapIO(count, c => c + 1));
-    var result = unfold.Take(24).Grouped(5).Collect().As().Run();
+    var result = unfold.Take(24).Grouped(5).CollectRec().As().Run();
     Assert.Equal([
       [1, 2, 3, 4, 5],
       [6, 7, 8, 9, 10],
@@ -133,7 +143,7 @@ public class Tests
   {
     var count = Atom(0);
     var unfold = Unfold.foreverM(() => swapIO(count, c => c + 1));
-    var result = unfold.Grouped(3).Take(4).Collect().As().Run();
+    var result = unfold.Grouped(3).Take(4).CollectRec().As().Run();
     Assert.Equal([
       [1, 2, 3],
       [4, 5, 6],
@@ -145,7 +155,7 @@ public class Tests
   public void TakeWhileTest()
   {
     var unfold = Unfold.fromSeq<IO, string>(["duck", "duck", "goose", "duck"]);
-    var result = unfold.TakeWhile(x => x == "duck").Collect().As().Run();
+    var result = unfold.TakeWhile(x => x == "duck").CollectRec().As().Run();
     Assert.Equal(["duck", "duck"], result);
   }
 
@@ -155,7 +165,7 @@ public class Tests
     var count = Atom(0);
     var unfold1 = Unfold.foreverM(() => swapIO(count, c => c + 1));
     var unfold2 = Unfold.fromSeq<IO, string>(["a", "b", "c", "d", "e"]);
-    var result = unfold1.Zip(unfold2).Collect().As().Run();
+    var result = unfold1.Zip(unfold2).CollectRec().As().Run();
     Assert.Equal([(1, "a"), (2, "b"), (3, "c"), (4, "d"), (5, "e")], result);
   }
 
@@ -167,7 +177,7 @@ public class Tests
       .Take(5).Grouped(2);
     var unfold2 = Unfold.foreverM(() => swapIO(count, c => c + 1))
       .Grouped(2).Take(3);
-    var result = unfold1.Concat(unfold2).Collect().As().Run();
+    var result = unfold1.Concat(unfold2).CollectRec().As().Run();
     Assert.Equal([[1, 2], [3, 4], [5], [6, 7], [8, 9], [10, 11]], result);
   }
 
@@ -187,7 +197,7 @@ public class Tests
         5
         )
       .Take(7)
-      .Collect().As().Run();
+      .CollectRec().As().Run();
     Console.WriteLine(res);
     var result = res.Map(xs => xs.Emit);
     // Timing assertion:
@@ -231,7 +241,7 @@ public class Tests
   {
     var count = Atom(0);
     var unfold = Unfold.foreverM(() => swapIO(count, c => c + 1));
-    var result = unfold.FilterMap(x => x % 2 == 0 ? Some($"{x}") : None).Take(5).Collect().As().Run();
+    var result = unfold.FilterMap(x => x % 2 == 0 ? Some($"{x}") : None).Take(5).CollectRec().As().Run();
     Assert.Equal(["2", "4", "6", "8", "10"], result);
   }
 }
