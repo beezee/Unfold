@@ -1,9 +1,15 @@
 ﻿namespace Unfold;
 
+public interface IsoUnfoldContext<M, S>
+{
+  public EitherT<S, IO, A> ToUnfoldContext<A>(S State, K<M, A> M);
+  public K<M, A> FromUnfoldContext<A>(EitherT<S, IO, A> M);
+}
+
 public record UnfoldFromIO<S, M, T, I>(
   Unfold<S, M, T> Unfold,
   I Iso
-) where I : NaturalTransformation<M, EitherT<S, IO>>, NaturalTransformation<EitherT<S, IO>, M>
+) where I : IsoUnfoldContext<M, S>
 {
 
   public UnfoldFromIO<S, M, T2, I> Map<T2>(Func<Unfold<S, M, T>, Unfold<S, M, T2>> f) =>
@@ -15,9 +21,9 @@ public record struct Unfold<S, M, T>(
   Func<S, K<M, (Option<S> State, Option<T> Emit)>> Step
 )
 {
-  public readonly UnfoldFromIO<S, M, T, I> IsoIO<I>(
+  public readonly UnfoldFromIO<S, M, T, I> IsoUnfoldContext<I>(
     I Iso
-  ) where I : NaturalTransformation<M, EitherT<S, IO>>, NaturalTransformation<EitherT<S, IO>, M> =>
+  ) where I : IsoUnfoldContext<M, S> =>
     new(this, Iso);
 };
 
@@ -35,11 +41,11 @@ public static class UnfoldExtensions
   public static SourceT<M, T> Source<S, M, T>(this Unfold<S, M, T> unfold)
   where M : MonadIO<M>, Alternative<M> => (
     from nxtHead in SourceT.liftM(unfold.Step(unfold.Start))
-    let tail = nxtHead.Item1.Match(
+    let tail = nxtHead.State.Match(
       None: () => SourceT.empty<M, T>(),
       Some: s => new Unfold<S, M, T>(s, unfold.Step).Source()
     )
-    from res in nxtHead.Item2.Match(
+    from res in nxtHead.Emit.Match(
       Some: h => SourceT.pure<M, T>(h) + tail,
       None: () => tail)
     select res
@@ -48,11 +54,11 @@ public static class UnfoldExtensions
   public static K<M, Seq<T>> CollectRec<S, M, T>(this Unfold<S, M, T> unfold)
   where M : Monad<M>, MonadIO<M>, Alternative<M> => (
     from nxtHead in unfold.Step(unfold.Start)
-    let tail = nxtHead.Item1.Match(
+    let tail = nxtHead.State.Match(
       None: () => M.Pure(toSeq<T>([])),
       Some: s => new Unfold<S, M, T>(s, unfold.Step).CollectRec()
     )
-    from res in nxtHead.Item2.Match(
+    from res in nxtHead.Emit.Match(
       Some: h => tail.Map(t => [h] + t),
       None: () => tail)
     select res
@@ -61,7 +67,7 @@ public static class UnfoldExtensions
   public static K<M, Unit> IterRec<S, M, T>(this Unfold<S, M, T> unfold)
   where M : Monad<M>, MonadIO<M>, Alternative<M> => (
     from nxtHead in unfold.Step(unfold.Start)
-    let tail = nxtHead.Item1.Match(
+    let tail = nxtHead.State.Match(
       None: () => M.Pure(unit),
       Some: s => new Unfold<S, M, T>(s, unfold.Step).IterRec()
     )
@@ -195,8 +201,8 @@ public static partial class Unfold
       (l.Start, r.Start),
       s => (l.Step(s.Item1), r.Step(s.Item2)).Apply(
         (lt, rt) => (
-          (lt.Item1, rt.Item1).Apply((s1, s2) => (s1, s2)).As(),
-          (lt.Item2, rt.Item2).Apply((a, b) => (a, b)).As())));
+          (lt.State, rt.State).Apply((s1, s2) => (s1, s2)).As(),
+          (lt.Emit, rt.Emit).Apply((a, b) => (a, b)).As())));
 
   public static Unfold<S, M, T> takeWhile<S, M, T>(Unfold<S, M, T> unfold, Func<T, bool> predicate)
   where M : MonadIO<M>, Alternative<M>, Functor<M> =>
@@ -285,12 +291,12 @@ public static partial class Unfold
       (unfold.Start, initial),
       su => unfold.Step(su.Item1).Map(st => (
         from nu in Identity.Pure(
-          st.Item2.Match<U>(
+          st.Emit.Match<U>(
             None: () => su.Item2,
             Some: t => folder(su.Item2, t)))
         select (
-          st.Item1.Map(s => (s, predicate(nu) ? initial : nu)),
-          Some(nu).Filter(x => st.Item1.IsNone || predicate(x))
+          st.State.Map(s => (s, predicate(nu) ? initial : nu)),
+          Some(nu).Filter(x => st.State.IsNone || predicate(x))
         )
       ).As().Value));
 
@@ -394,13 +400,13 @@ public static partial class Unfold
       fst.Start,
       s => finishedFst
         ? snd.Step(s)
-        : fst.Step(s).Bind(t => t.Item1.Match(
+        : fst.Step(s).Bind(t => t.State.Match(
           None: () =>
           {
             finishedFst = true;
-            return M.Pure((Some(snd.Start), t.Item2));
+            return M.Pure((Some(snd.Start), t.Emit));
           },
-          Some: x => M.Pure((Some(x), t.Item2))
+          Some: x => M.Pure((Some(x), t.Emit))
         )));
   }
 
@@ -408,13 +414,13 @@ public static partial class Unfold
   where M : MonadIO<M>, Alternative<M> =>
     new(
       unfold.Start,
-      s => unfold.Step(s).Map(t => (t.Item1, t.Item2.Map(f))));
+      s => unfold.Step(s).Map(t => (t.State, t.Emit.Map(f))));
 
   public static Unfold<S, M, U> filterMap<S, M, T, U>(this Unfold<S, M, T> unfold, Func<T, Option<U>> f)
   where M : MonadIO<M>, Alternative<M> =>
     new(
       unfold.Start,
-      s => unfold.Step(s).Map(t => (t.Item1, t.Item2.Bind(f))));
+      s => unfold.Step(s).Map(t => (t.State, t.Emit.Bind(f))));
 
   public static Unfold<S, M, U> bindM<S, M, T, U>(this Unfold<S, M, T> unfold, Func<T, K<M, U>> f)
   where M : MonadIO<M>, Alternative<M>, Monad<M> =>
@@ -427,10 +433,10 @@ public static partial class Unfold
   public static K<M, (Option<S>, Seq<A>)> Collect<M, S, A, T>(
     this UnfoldFromIO<S, M, A, T> unfold
   )
-  where T : NaturalTransformation<M, EitherT<S, IO>>, NaturalTransformation<EitherT<S, IO>, M> {
+  where T : IsoUnfoldContext<M, S> {
     var results = new List<A>();
     Option<S> lastProcessedState = None;
-    return unfold.Iso.Transform(EitherT.lift<S, IO, (Option<S>, Seq<A>)>(IO.lift(() =>
+    return unfold.Iso.FromUnfoldContext(EitherT.lift<S, IO, (Option<S>, Seq<A>)>(IO.lift(() =>
     {
       var stateOpt = Some(unfold.Unfold.Start);
 
@@ -439,7 +445,7 @@ public static partial class Unfold
         var s = stateOpt.IfNone(unfold.Unfold.Start);
 
         var stepRes =
-          unfold.Iso.Transform(unfold.Unfold.Step(s))
+          unfold.Iso.ToUnfoldContext(s, unfold.Unfold.Step(s))
               .As()
               .Run()
               .Run();

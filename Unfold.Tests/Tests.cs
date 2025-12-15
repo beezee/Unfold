@@ -43,13 +43,13 @@ Alternative<MyEitherIO<E>>
     Choose(ma, () => mb);
 }
 
-public record MyEitherIOIso<S>() : NaturalTransformation<MyEitherIO<S>, EitherT<S, IO>>, NaturalTransformation<EitherT<S, IO>, MyEitherIO<S>>
+public record MyEitherIOIso<S>() : IsoUnfoldContext<MyEitherIO<S>, S>
 {
-  public K<EitherT<S, IO>, A> Transform<A>(K<MyEitherIO<S>, A> fa) =>
-    fa.As().Run;
+  public K<MyEitherIO<S>, A> FromUnfoldContext<A>(EitherT<S, IO, A> M) =>
+    new MyEitherIO<S, A>(M);
 
-  K<MyEitherIO<S>, A> NaturalTransformation<EitherT<S, IO>, MyEitherIO<S>>.Transform<A>(K<EitherT<S, IO>, A> fa) =>
-    new MyEitherIO<S, A>(fa.As());
+  public EitherT<S, IO, A> ToUnfoldContext<A>(S State, K<MyEitherIO<S>, A> M) =>
+    M.As().Run;
 }
 
 public record MapLeft<E1, E2>(Func<E1, E2> Map)
@@ -119,7 +119,7 @@ public class Tests
   {
     var unfold = new Unfold<int, MyEitherIO<string>, string>(0, n => new MyEitherIO<string, (Option<int>, Option<string>)>(EitherT.Left<string, IO, (Option<int>, Option<string>)>("hello")));
     var transformed = unfold.Transform(new MyEitherIOMapLeft<string, int>(new MapLeft<string, int>(s => s.Length)))
-      .IsoIO(new MyEitherIOIso<int>());
+      .IsoUnfoldContext(new MyEitherIOIso<int>());
     var result = transformed.Map(x => x.Take(5)).Collect().As().Run.Run().Run();
     Assert.Equal(Right<int, (Option<int>, Seq<string>)>((Some(5), [])), result);
   }
