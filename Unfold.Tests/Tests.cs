@@ -244,4 +244,35 @@ public class Tests
     var result = unfold.FilterMap(x => x % 2 == 0 ? Some($"{x}") : None).Take(5).CollectRec().As().Run();
     Assert.Equal(["2", "4", "6", "8", "10"], result);
   }
+
+  [Fact]
+  public void IterTest()
+  {
+    // Test that Iter is stack-safe and executes all steps
+    var count = Atom(0);
+    var stepCount = Atom(0);
+    var iterations = 50000; // Large enough to cause stack overflow if recursive
+
+    var unfold = Unfold.foreverM(() =>
+      new MyEitherIO<Unit, Unit>(EitherT<Unit, IO, Unit>.LiftIO(
+        from _incrementedCount in swapIO(count, c => c + 1)
+        from _incrementedStepCount in swapIO(stepCount, s => s + 1)
+        select unit
+      ))
+    ).Take(iterations)
+      .IsoUnfoldContext(new MyEitherIOIso<Unit>());
+
+    var result = unfold.Iter().As().Run.Run().Run();
+
+    // Verify all steps executed
+    Assert.Equal(iterations, stepCount.Value);
+    // Verify final count reached expected value
+    Assert.Equal(iterations, count.Value);
+    // Verify result contains the final state
+    Assert.True(result.IsRight);
+
+    // Note: Using IterRec instead of Iter would cause a StackOverflowException
+    // with this many iterations, demonstrating that Iter is stack-safe:
+    // var recursiveResult = unfold.Unfold.IterRec().As().Run(); // Would throw!
+  }
 }

@@ -458,4 +458,31 @@ public static partial class Unfold
       return (lastProcessedState, toSeq(results));
     })));
   }
+
+  public static K<M, Option<S>> Iter<M, S, A, T>(
+    this UnfoldFromIO<S, M, A, T> unfold
+  )
+  where T : IsoUnfoldContext<M, S> {
+    Option<S> lastProcessedState = None;
+    return unfold.Iso.FromUnfoldContext(EitherT.lift<S, IO, Option<S>>(IO.lift(() =>
+    {
+      var stateOpt = Some(unfold.Unfold.Start);
+
+      while (stateOpt.IsSome)
+      {
+        var s = stateOpt.IfNone(unfold.Unfold.Start);
+
+        var stepRes =
+          unfold.Iso.ToUnfoldContext(s, unfold.Unfold.Step(s))
+              .As()
+              .Run()
+              .Run();
+
+        lastProcessedState = stepRes.Swap().ToOption().IfNone(s);
+        stateOpt = stepRes.ToOption().Bind(x => x.State);
+      }
+
+      return lastProcessedState;
+    })));
+  }
 }
